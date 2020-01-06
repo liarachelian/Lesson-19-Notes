@@ -10,3 +10,4 @@ In conclusion section, the instructor asked students to complete an exercise. Wh
 5. Create Security Group for the instance
 6. Create internet gateway and attach to the VPC created
 7. Create Route table to VPC  
+8. ssh -i my_rsa_key ec2-user@ec2-198-51-100-1.compute-1.amazonaws.com (Public DNS name)
