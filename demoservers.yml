@@ -1,0 +1,147 @@
+Description: |
+    Lee Arachelian- Udacity Cloud Tech Course 
+
+Parameters:
+
+     EnvironmentName:
+         Description: Env Name that will be prefixed in order to access Variables exported in the stack from Lession 21
+         Type: String
+
+Resources:
+
+  
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow hhtp to Load Balanacer
+      VpcId: 
+          Fn::ImportValue:
+            !Sub "${EnvironmentName}-VPCID"
+      GroupName: Security Group for Load Balancer
+      SecurityGroupEgress: 
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+      SecurityGroupIngress: 
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+   
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow http / SSH only from local VPC
+      VpcId: 
+          Fn::ImportValue:
+            !Sub "${EnvironmentName}-VPCID"
+      GroupName: Security Group for WebServer internal traffic
+      SecurityGroupEgress: 
+        - CidrIp: 0.0.0.0/0
+          FromPort: 0
+          ToPort: 65535
+          IpProtocol: tcp
+      SecurityGroupIngress: 
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+  
+  WebAppLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash
+            apt-get update -y
+            apt-get install apache2 -y
+            cd /var/www/html
+            aws s3 cp s3://your-bucket-address/udacity.zip .
+            unzip -o udacity.zip
+            systemctl start apache2.service        
+
+      ImageId: ami-0d1cd67c26f5fca19  # ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-20191002
+      SecurityGroups:
+      - Ref: WebServerSecGroup
+      IamInstanceProfile: !Ref ProfileWithRolesForOurApp
+      KeyName: "private-server-key"
+      InstanceType: t3.small
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sdk"
+        Ebs:
+          VolumeSize: '10'
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
+      LaunchConfigurationName:
+        Ref: WebAppLaunchConfig
+      MinSize: "4"
+      MaxSize: "5"
+      TargetGroupARNs:
+        - Ref: WebAppTargetGroup
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+      SecurityGroups:
+      - Ref: LBSecGroup
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: WebAppTargetGroup
+      LoadBalancerArn:
+        Ref: WebAppLB
+      Port: '80'
+      Protocol: HTTP
+  ALBListenerRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties:
+        Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'WebAppTargetGroup'
+        Conditions:
+        - Field: path-pattern
+          Values: [/]
+        ListenerArn: !Ref 'Listener'
+        Priority: 1
+  WebAppTargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties: 
+        HealthCheckIntervalSeconds: 10
+        HealthCheckPath: /
+        HealthCheckProtocol: HTTP
+        HealthCheckTimeoutSeconds: 8
+        HealthyThresholdCount: 2
+        Port: 80
+        Protocol: HTTP
+        UnhealthyThresholdCount: 5
+        VpcId: 
+          Fn::ImportValue:
+            !Sub "${EnvironmentName}-VPCID"
+  
+  ProfileWithRolesForOurApp:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      InstanceProfileName: "MyProfile"
+      Path: "/"
+      Roles: 
+        - S3_IAM_Role
+Outputs: 
+
+    WebAppLB:
+        Description: The public URL of the LoadBalancer
+        Value: !GetAtt WebAppLB.DNSName
+        Export:
+          Name: !Sub ${EnvironmentName}-Udagram
